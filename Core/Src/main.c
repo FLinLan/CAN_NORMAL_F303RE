@@ -62,32 +62,12 @@ static void MX_CAN_Init(void);
 CAN_TxHeaderTypeDef TxHeader;
 CAN_RxHeaderTypeDef RxHeader;
 
-uint8_t TxData[8];
+uint8_t TxData[8] = {0x00, 0x00, 0x00, 0x00, // IEEE 754 float: vel : 2 rev/s
+					 0x00, 0x00, 0x00, 0x00}; // IEEE 754 float: torque : 0
 uint8_t RxData[8];
 
 uint32_t TxMailbox;
 
-int datacheck = 0;
-
-void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin)
-{
-	if (GPIO_Pin == GPIO_PIN_13)
-	{
-		TxData[0] = 100; // 100 ms delay
-		TxData[1] = 10; // loop repeat
-
-		HAL_CAN_AddTxMessage(&hcan, &TxHeader, TxData, &TxMailbox);
-	}
-}
-
-void HAL_CAN_RxFifo0MsgPendingCallback(CAN_HandleTypeDef *hcan)
-{
-	HAL_CAN_GetRxMessage(hcan, CAN_RX_FIFO0, &RxHeader, RxData);
-	if (RxHeader.DLC == 2)
-	{
-		datacheck = 1;
-	}
-}
 /* USER CODE END 0 */
 
 /**
@@ -125,14 +105,10 @@ int main(void)
 
   HAL_CAN_Start(&hcan);
 
-  // activate the notification
-  HAL_CAN_ActivateNotification(&hcan, CAN_IT_RX_FIFO0_MSG_PENDING);
-
-  TxHeader.DLC = 2;
+  TxHeader.StdId = (0x00 << 5) | 0x00D; // 0x00D = setInputVelocity, node_id = 0
   TxHeader.IDE = CAN_ID_STD;
   TxHeader.RTR = CAN_RTR_DATA;
-  TxHeader.StdId = 0x303; // should be 0x000 for Odrive node_id = 0, or broadcast id 0x3f
-
+  TxHeader.DLC = 8;
   /* USER CODE END 2 */
 
   /* Infinite loop */
@@ -140,17 +116,11 @@ int main(void)
   while (1)
   {
     /* USER CODE END WHILE */
-
-    /* USER CODE BEGIN 3 */
-	if (datacheck)
-	{
-		for (int i = 0; i < RxData[1]; i++)
-		{
-			HAL_GPIO_TogglePin(GPIOA, GPIO_PIN_5); // need to check this for nucleo
-			HAL_Delay(RxData[0]); // time delay
-		}
-		datacheck = 0;
+	if (HAL_CAN_AddTxMessage(&hcan, &TxHeader, TxData, &TxMailbox) != HAL_OK) {
+	  // handle error…
 	}
+	HAL_Delay(100);
+    /* USER CODE BEGIN 3 */
   }
   /* USER CODE END 3 */
 }
@@ -217,11 +187,11 @@ static void MX_CAN_Init(void)
 
   /* USER CODE END CAN_Init 1 */
   hcan.Instance = CAN;
-  hcan.Init.Prescaler = 18;
+  hcan.Init.Prescaler = 8;
   hcan.Init.Mode = CAN_MODE_NORMAL;
   hcan.Init.SyncJumpWidth = CAN_SJW_1TQ;
-  hcan.Init.TimeSeg1 = CAN_BS1_2TQ;
-  hcan.Init.TimeSeg2 = CAN_BS2_1TQ;
+  hcan.Init.TimeSeg1 = CAN_BS1_12TQ;
+  hcan.Init.TimeSeg2 = CAN_BS2_5TQ;
   hcan.Init.TimeTriggeredMode = DISABLE;
   hcan.Init.AutoBusOff = DISABLE;
   hcan.Init.AutoWakeUp = DISABLE;
@@ -233,21 +203,9 @@ static void MX_CAN_Init(void)
     Error_Handler();
   }
   /* USER CODE BEGIN CAN_Init 2 */
-  CAN_FilterTypeDef canFilterConfig;
 
-  canFilterConfig.FilterActivation = CAN_FILTER_ENABLE;
-  canFilterConfig.FilterBank = 18; // which filter bank to use from the assigned ones
-  canFilterConfig.FilterFIFOAssignment = CAN_FILTER_FIFO0;
-  canFilterConfig.FilterIdHigh = 0x407 << 5;
-  canFilterConfig.FilterIdLow = 0;
-  canFilterConfig.FilterMaskIdHigh = 0x407 << 5;
-  canFilterConfig.FilterMaskIdLow = 0x0000;
-  canFilterConfig.FilterMode = CAN_FILTERMODE_IDMASK;
-  canFilterConfig.FilterScale = CAN_FILTERSCALE_32BIT;
-  canFilterConfig.SlaveStartFilterBank = 20;  // how many filters to assign to CAN1 (master can)
-
-  HAL_CAN_ConfigFilter(&hcan, &canFilterConfig);
   /* USER CODE END CAN_Init 2 */
+
 }
 
 /**

@@ -18,7 +18,7 @@
 /* USER CODE END Header */
 /* Includes ------------------------------------------------------------------*/
 #include "main.h"
-
+#include "CANMessages.h"
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
 
@@ -31,7 +31,7 @@
 
 /* Private define ------------------------------------------------------------*/
 /* USER CODE BEGIN PD */
-
+#define NODE_ID 0x00
 /* USER CODE END PD */
 
 /* Private macro -------------------------------------------------------------*/
@@ -105,7 +105,8 @@ int main(void)
 
   HAL_CAN_Start(&hcan);
 
-  TxHeader.StdId = (0x00 << 5) | 0x00D; // 0x00D = setInputVelocity, node_id = 0
+  // sending over the CANPacket
+  TxHeader.StdId = (NODE_ID << 5) | SET_INPUT_VEL; // 0x00D = setInputVelocity, node_id = 0
   TxHeader.IDE = CAN_ID_STD;
   TxHeader.RTR = CAN_RTR_DATA;
   TxHeader.DLC = 8;

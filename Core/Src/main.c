@@ -17,11 +17,11 @@
   */
 /* USER CODE END Header */
 /* Includes ------------------------------------------------------------------*/
-#include "main.h"
-#include "CANMessages.h"
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
-
+#include "main.h"
+#include "CANMessages.h"
+#include <string.h>
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -68,6 +68,23 @@ uint8_t RxData[8];
 
 uint32_t TxMailbox;
 
+void floatToUpperBytes(float val, uint8_t* byteArr) {
+  union {
+    float var;
+    uint8_t buf[sizeof(float)];
+  } u;
+  u.var = val;
+  memcpy(byteArr, u.buf, sizeof(float)); // Write to bytes 0–3
+}
+
+void floatToLowerBytes(float val, uint8_t* byteArr) {
+  union {
+    float var;
+    uint8_t buf[sizeof(float)];
+  } u;
+  u.var = val;
+  memcpy(byteArr + 4, u.buf, sizeof(float)); // Write to bytes 4–7
+}
 /* USER CODE END 0 */
 
 /**
@@ -105,12 +122,14 @@ int main(void)
 
   HAL_CAN_Start(&hcan);
 
+
   // sending over the CANPacket
   TxHeader.StdId = (NODE_ID << 5) | SET_INPUT_VEL; // 0x00D = setInputVelocity, node_id = 0
   TxHeader.IDE = CAN_ID_STD;
   TxHeader.RTR = CAN_RTR_DATA;
   TxHeader.DLC = 8;
   /* USER CODE END 2 */
+  floatToLowerBytes(3.0f, TxData); // velocity bytes
 
   /* Infinite loop */
   /* USER CODE BEGIN WHILE */

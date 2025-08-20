@@ -17,11 +17,14 @@
   */
 /* USER CODE END Header */
 /* Includes ------------------------------------------------------------------*/
+#include "main.h"
+
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
 #include "main.h"
 #include "CANMessages.h"
 #include <string.h>
+#include <stdio.h>
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -54,7 +57,40 @@ static void MX_GPIO_Init(void);
 static void MX_USART2_UART_Init(void);
 static void MX_CAN_Init(void);
 /* USER CODE BEGIN PFP */
+/* The below code allows user to setup scanf and printf functions inside via
+ * serial console, read the entire documentation below for more details:
+ * FORUM LINK BELOW: https://forum.digikey.com/t/easily-use-scanf-on-stm32/21103
+ * */
+#ifdef __GNUC__
+#define PUTCHAR_PROTOTYPE int __io_putchar(int ch)
+#define GETCHAR_PROTOTYPE int __io_getchar(void)
+#else
+#define PUTCHAR_PROTOTYPE int fputc(int ch, FILE *f)
+#define GETCHAR_PROTOTYPE int fgetc(FILE *f)
+#endif
 
+PUTCHAR_PROTOTYPE
+{
+  HAL_UART_Transmit(&huart2, (uint8_t *)&ch, 1, HAL_MAX_DELAY);
+  return ch;
+}
+
+GETCHAR_PROTOTYPE
+{
+  uint8_t ch = 0;
+
+  /* Clear the Overrun flag just before receiving the first character */
+  __HAL_UART_CLEAR_OREFLAG(&huart2);
+
+  /* Wait for reception of a character on the USART RX line and echo this
+   * character on console */
+  HAL_UART_Receive(&huart2, (uint8_t *)&ch, 1, HAL_MAX_DELAY);
+  HAL_UART_Transmit(&huart2, (uint8_t *)&ch, 1, HAL_MAX_DELAY);
+  return ch;
+}
+
+void floatToUpperBytes(float val, uint8_t* byteArr);
+void floatToLowerBytes(float val, uint8_t* byteArr);
 /* USER CODE END PFP */
 
 /* Private user code ---------------------------------------------------------*/
@@ -62,12 +98,20 @@ static void MX_CAN_Init(void);
 CAN_TxHeaderTypeDef TxHeader;
 CAN_RxHeaderTypeDef RxHeader;
 
-uint8_t TxData[8] = {0x00, 0x00, 0x00, 0x00, // IEEE 754 float: vel : 2 rev/s
-					 0x00, 0x00, 0x00, 0x00}; // IEEE 754 float: torque : 0
+uint8_t TxData[8] = {0x00, 0x00, 0x00, 0x00, // IEEE 754 float: vel : 2 rev/s: UPPER BYTES
+					 0x00, 0x00, 0x00, 0x00}; // IEEE 754 float: torque : 0: LOWER BYTES
 uint8_t RxData[8];
 
 uint32_t TxMailbox;
 
+/*
+ * Parameters:
+ *  float val: Input float value for conversion to bytes
+ *  uint8_t* byteArr: Array of bytes with size of 8
+ *
+ * Function:
+ * 	converts a 4 byte float value and fill in bytes 0-3 in an 8 bytes array in little endian
+*/
 void floatToUpperBytes(float val, uint8_t* byteArr) {
   union {
     float var;
@@ -77,6 +121,9 @@ void floatToUpperBytes(float val, uint8_t* byteArr) {
   memcpy(byteArr, u.buf, sizeof(float)); // Write to bytes 0–3
 }
 
+/*
+* Same function and parameters as above but instead writes to bytes 4-7
+*/
 void floatToLowerBytes(float val, uint8_t* byteArr) {
   union {
     float var;
@@ -121,25 +168,34 @@ int main(void)
   /* USER CODE BEGIN 2 */
 
   HAL_CAN_Start(&hcan);
+  setvbuf(stdin, NULL, _IONBF, 0); // for scanf setup, avoiding errors in syscalls.c
 
-
-  // sending over the CANPacket
-  TxHeader.StdId = (NODE_ID << 5) | SET_INPUT_VEL; // 0x00D = setInputVelocity, node_id = 0
-  TxHeader.IDE = CAN_ID_STD;
-  TxHeader.RTR = CAN_RTR_DATA;
-  TxHeader.DLC = 8;
+  int cmd_id;
+  int dlc;
+  float value;
   /* USER CODE END 2 */
-  floatToLowerBytes(3.0f, TxData); // velocity bytes
 
   /* Infinite loop */
   /* USER CODE BEGIN WHILE */
   while (1)
   {
-    /* USER CODE END WHILE */
-	if (HAL_CAN_AddTxMessage(&hcan, &TxHeader, TxData, &TxMailbox) != HAL_OK) {
-	  // handle error…
+	if (scanf("%x %d %f", &cmd_id, &dlc, &value) == 3)
+	{
+		printf("packet sent: CMD:0x%x, DLC:%d, VAL: %f \r\n", cmd_id, dlc, value);
+		memset(TxData, 0, sizeof(TxData));
+
+		TxHeader.StdId = (NODE_ID << 5) | cmd_id;
+		TxHeader.IDE = CAN_ID_STD;
+		TxHeader.RTR = CAN_RTR_DATA;
+		TxHeader.DLC = dlc;
+
+		// Put value as bytes directly into TxData
+		// example usage: "0x0D 8 2.0" VELOCITY_MODE with DLC = 8 and spinning at INPUT_VEL 2 rev/s.
+		floatToUpperBytes(value, TxData);
+		HAL_CAN_AddTxMessage(&hcan, &TxHeader, TxData, &TxMailbox);
 	}
-	HAL_Delay(100);
+    /* USER CODE END WHILE */
+
     /* USER CODE BEGIN 3 */
   }
   /* USER CODE END 3 */
@@ -244,7 +300,7 @@ static void MX_USART2_UART_Init(void)
 
   /* USER CODE END USART2_Init 1 */
   huart2.Instance = USART2;
-  huart2.Init.BaudRate = 38400;
+  huart2.Init.BaudRate = 115200;
   huart2.Init.WordLength = UART_WORDLENGTH_8B;
   huart2.Init.StopBits = UART_STOPBITS_1;
   huart2.Init.Parity = UART_PARITY_NONE;

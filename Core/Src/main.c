@@ -48,7 +48,12 @@ CAN_HandleTypeDef hcan;
 UART_HandleTypeDef huart2;
 
 /* USER CODE BEGIN PV */
+typedef enum {
+    MODE_POSITION = 0,
+    MODE_VELOCITY = 1
+} ControlMode_t;
 
+ControlMode_t currentMode = MODE_VELOCITY;
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
@@ -145,35 +150,59 @@ void motorCalibration(CAN_TxHeaderTypeDef TxHeader) {
 	axisState[0] = 0x03; // FULL_CALIBRATION_SEQUENCE
 
 	HAL_CAN_AddTxMessage(&hcan, &TxHeader, axisState, &TxMailbox);
-//	axisState[0] = 0x07; // ENCODER_OFFSET_CALIBRATION
-//
-//	HAL_CAN_AddTxMessage(&hcan, &TxHeader, axisState, &TxMailbox);
 }
 
-void setVelocityMode(CAN_TxHeaderTypeDef TxHeader) {
-	uint8_t velData[8] = {0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00};
-	uint8_t velGain[8] = {0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00};
+void setPositionCommand(float position) {
+    // Set Position Mode
+    memset(TxData, 0, sizeof(TxData));
+    TxHeader.StdId = (NODE_ID << 5) | 0x0B;
+    TxHeader.IDE = CAN_ID_STD;
+    TxHeader.RTR = CAN_RTR_DATA;
+    TxHeader.DLC = 8;
 
-	// Setting vel_gains = 0.015, vel_integrator_gain = 0
-	// Refer to the tuning guide for more details:
-	// https://docs.odriverobotics.com/v/latest/guides/tuning.html
-	TxHeader.StdId = (NODE_ID << 5) | 0x1b;
-	floatToUpperBytes(0.015f, velGain);
-	HAL_CAN_AddTxMessage(&hcan, &TxHeader, velGain, &TxMailbox);
+    TxData[0] = 0x01; // InputMode.PASSTHROUGH
+    TxData[4] = 0x03; // ControlMode.POSITION_CONTROL
+    HAL_CAN_AddTxMessage(&hcan, &TxHeader, TxData, &TxMailbox);
 
-	TxHeader.StdId = (NODE_ID << 5) | 0x0b;
-	velData[0] = 0x02; // InputMode.PASSTHROUGH
-	velData[4] = 0x01; // ControlMode.VELOCITY_CONTROL
+    // Set Closed Loop State
+    memset(TxData, 0, sizeof(TxData));
+    TxHeader.StdId = (NODE_ID << 5) | 0x07;
+    TxData[0] = 0x08; // AXIS_STATE_CLOSED_LOOP_CONTROL
+    HAL_CAN_AddTxMessage(&hcan, &TxHeader, TxData, &TxMailbox);
 
-	HAL_CAN_AddTxMessage(&hcan, &TxHeader, velData, &TxMailbox);
-
-	memset(velData, 0, sizeof(velData)); // Clear all previous data
-
-	TxHeader.StdId = (NODE_ID << 5) | 0x07;
-	velData[0] = 0x08; // AXIS_STATE_CLOSED_LOOP_CONTROL
-	HAL_CAN_AddTxMessage(&hcan, &TxHeader, velData, &TxMailbox);
+    // Send Position Command
+    memset(TxData, 0, sizeof(TxData));
+    TxHeader.StdId = (NODE_ID << 5) | 0x0C;
+    TxHeader.DLC = 8;
+    floatToUpperBytes(position, TxData);
+    HAL_CAN_AddTxMessage(&hcan, &TxHeader, TxData, &TxMailbox);
 }
 
+void setVelocityCommand(float velocity) {
+    // Set Velocity Mode
+    memset(TxData, 0, sizeof(TxData));
+    TxHeader.StdId = (NODE_ID << 5) | 0x0B;
+    TxHeader.IDE = CAN_ID_STD;
+    TxHeader.RTR = CAN_RTR_DATA;
+    TxHeader.DLC = 8;
+
+    TxData[0] = 0x02; // InputMode.PASSTHROUGH
+    TxData[4] = 0x01; // ControlMode.VELOCITY_CONTROL
+    HAL_CAN_AddTxMessage(&hcan, &TxHeader, TxData, &TxMailbox);
+
+    // Set Closed Loop State
+    memset(TxData, 0, sizeof(TxData));
+    TxHeader.StdId = (NODE_ID << 5) | 0x07;
+    TxData[0] = 0x08; // AXIS_STATE_CLOSED_LOOP_CONTROL
+    HAL_CAN_AddTxMessage(&hcan, &TxHeader, TxData, &TxMailbox);
+
+    // Send Velocity Command
+    memset(TxData, 0, sizeof(TxData));
+    TxHeader.StdId = (NODE_ID << 5) | 0x0D;
+    TxHeader.DLC = 8;
+    floatToUpperBytes(velocity, TxData);
+    HAL_CAN_AddTxMessage(&hcan, &TxHeader, TxData, &TxMailbox);
+}
 /* USER CODE END 0 */
 
 /**
@@ -222,20 +251,29 @@ int main(void)
   /* USER CODE BEGIN WHILE */
   // motorCalibration(TxHeader); // calibrate the motor for one time
 
+
   while (1)
   {
+	if (scanf("%x", &cmd_id) == 'z') {
+		printf("Full Calibration \r\n");
+		motorCalibration(TxHeader);
+	}
+
 	if (scanf("%x %d %f", &cmd_id, &dlc, &value) == 3)
 	{
 		printf("packet sent: CMD:0x%x, DLC:%d, VALUE:%f \r\n", cmd_id, dlc, value);
 		memset(TxData, 0, sizeof(TxData));
 
-		switch (cmd_id) {
-		    case 0x0d:
-		        // code block
-		    	setVelocityMode(TxHeader);
-		        break;
-		    default:
-		}
+	      switch (cmd_id) {
+	          case 0x0c: // Position command
+	              setPositionCommand(value);
+	              break;
+	          case 0x0d: // Velocity command
+	              setVelocityCommand(value);
+	              break;
+	          default:
+	              break;
+	    }
 
 		TxHeader.StdId = (NODE_ID << 5) | cmd_id;
 		TxHeader.IDE = CAN_ID_STD;

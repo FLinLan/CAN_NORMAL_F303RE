@@ -91,6 +91,8 @@ GETCHAR_PROTOTYPE
 
 void floatToUpperBytes(float val, uint8_t* byteArr);
 void floatToLowerBytes(float val, uint8_t* byteArr);
+void motorCalibration(CAN_TxHeaderTypeDef TxHeader);
+void setVelocityMode(CAN_TxHeaderTypeDef TxHeader);
 /* USER CODE END PFP */
 
 /* Private user code ---------------------------------------------------------*/
@@ -132,6 +134,46 @@ void floatToLowerBytes(float val, uint8_t* byteArr) {
   u.var = val;
   memcpy(byteArr + 4, u.buf, sizeof(float)); // Write to bytes 4–7
 }
+
+void motorCalibration(CAN_TxHeaderTypeDef TxHeader) {
+	uint8_t axisState[8];
+	TxHeader.StdId = (NODE_ID << 5) | 0x07;
+	TxHeader.IDE = CAN_ID_STD;
+	TxHeader.RTR = CAN_RTR_DATA;
+	TxHeader.DLC = 8;
+
+	axisState[0] = 0x03; // FULL_CALIBRATION_SEQUENCE
+
+	HAL_CAN_AddTxMessage(&hcan, &TxHeader, axisState, &TxMailbox);
+//	axisState[0] = 0x07; // ENCODER_OFFSET_CALIBRATION
+//
+//	HAL_CAN_AddTxMessage(&hcan, &TxHeader, axisState, &TxMailbox);
+}
+
+void setVelocityMode(CAN_TxHeaderTypeDef TxHeader) {
+	uint8_t velData[8] = {0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00};
+	uint8_t velGain[8] = {0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00};
+
+	// Setting vel_gains = 0.015, vel_integrator_gain = 0
+	// Refer to the tuning guide for more details:
+	// https://docs.odriverobotics.com/v/latest/guides/tuning.html
+	TxHeader.StdId = (NODE_ID << 5) | 0x1b;
+	floatToUpperBytes(0.015f, velGain);
+	HAL_CAN_AddTxMessage(&hcan, &TxHeader, velGain, &TxMailbox);
+
+	TxHeader.StdId = (NODE_ID << 5) | 0x0b;
+	velData[0] = 0x02; // InputMode.PASSTHROUGH
+	velData[4] = 0x01; // ControlMode.VELOCITY_CONTROL
+
+	HAL_CAN_AddTxMessage(&hcan, &TxHeader, velData, &TxMailbox);
+
+	memset(velData, 0, sizeof(velData)); // Clear all previous data
+
+	TxHeader.StdId = (NODE_ID << 5) | 0x07;
+	velData[0] = 0x08; // AXIS_STATE_CLOSED_LOOP_CONTROL
+	HAL_CAN_AddTxMessage(&hcan, &TxHeader, velData, &TxMailbox);
+}
+
 /* USER CODE END 0 */
 
 /**
@@ -170,28 +212,39 @@ int main(void)
   HAL_CAN_Start(&hcan);
   setvbuf(stdin, NULL, _IONBF, 0); // for scanf setup, avoiding errors in syscalls.c
 
-  int cmd_id;
-  int dlc;
-  float value;
+  int cmd_id = 0;
+  int dlc = 0;
+  float value = 0.0;
+
   /* USER CODE END 2 */
 
   /* Infinite loop */
   /* USER CODE BEGIN WHILE */
+  // motorCalibration(TxHeader); // calibrate the motor for one time
+
   while (1)
   {
 	if (scanf("%x %d %f", &cmd_id, &dlc, &value) == 3)
 	{
-		printf("packet sent: CMD:0x%x, DLC:%d, VAL: %f \r\n", cmd_id, dlc, value);
+		printf("packet sent: CMD:0x%x, DLC:%d, VALUE:%f \r\n", cmd_id, dlc, value);
 		memset(TxData, 0, sizeof(TxData));
+
+		switch (cmd_id) {
+		    case 0x0d:
+		        // code block
+		    	setVelocityMode(TxHeader);
+		        break;
+		    default:
+		}
 
 		TxHeader.StdId = (NODE_ID << 5) | cmd_id;
 		TxHeader.IDE = CAN_ID_STD;
 		TxHeader.RTR = CAN_RTR_DATA;
 		TxHeader.DLC = dlc;
 
-		// Put value as bytes directly into TxData
-		// example usage: "0x0D 8 2.0" VELOCITY_MODE with DLC = 8 and spinning at INPUT_VEL 2 rev/s.
-		floatToUpperBytes(value, TxData);
+		// example usage: "0x0D 8 2.0" VELOCITY_MODE with DLC = 8 and spinning at INPUT_VEL 2 rev/s
+		floatToUpperBytes(value, TxData); // setting bytes 0-3
+		//		floatToLowerBytes(lowerVal, TxData); // setting bytes 4-7
 		HAL_CAN_AddTxMessage(&hcan, &TxHeader, TxData, &TxMailbox);
 	}
     /* USER CODE END WHILE */
